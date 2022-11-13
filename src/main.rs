@@ -95,61 +95,43 @@ mod tests {
     use actix_web::{body::to_bytes, dev::Service, http, test, web, App};
 
     #[actix_web::test]
-    async fn test_happy_path() {
+    async fn test_happy_paths() {
         let app = test::init_service(
             App::new().service(web::resource("/").route(web::post().to(json_rpc_handler))),
         )
         .await;
 
-        let req = test::TestRequest::post()
-            .uri("/")
-            .set_json(&GreetingRequest {
+        let key_values = vec![("", "Hello, World!"), ("Oliver", "Hello, Oliver!")];
+
+        for key_value in key_values {
+            let req = test::TestRequest::post()
+                .uri("/")
+                .set_json(GreetingRequest {
+                    id: "00000000-0000-0000-0000-000000000000".to_owned(),
+                    jsonrpc: "2.0".to_owned(),
+                    method: "greeting".to_owned(),
+                    params: GreetingParams {
+                        name: key_value.0.to_owned(),
+                    },
+                })
+                .to_request();
+            let resp = app.call(req).await.unwrap();
+
+            assert_eq!(resp.status(), http::StatusCode::OK);
+
+            let result = GreetingResponse {
                 id: "00000000-0000-0000-0000-000000000000".to_owned(),
                 jsonrpc: "2.0".to_owned(),
-                method: "greeting".to_owned(),
-                params: GreetingParams {
-                    name: "Oliver".to_owned(),
+                result: GreetingResult {
+                    greeting: key_value.1.to_owned(),
                 },
-            })
-            .to_request();
-        let resp = app.call(req).await.unwrap();
+            };
 
-        assert_eq!(resp.status(), http::StatusCode::OK);
+            let actual = to_bytes(resp.into_body()).await.unwrap();
+            let expected = serde_json::to_string(&result).unwrap();
 
-        let body_bytes = to_bytes(resp.into_body()).await.unwrap();
-        assert_eq!(
-            body_bytes,
-            r##"{"id":"00000000-0000-0000-0000-000000000000","jsonrpc":"2.0","result":{"greeting":"Hello, Oliver!"}}"##
-        );
-    }
-
-    #[actix_web::test]
-    async fn test_non_existant_method() {
-        let app = test::init_service(
-            App::new().service(web::resource("/").route(web::post().to(json_rpc_handler))),
-        )
-        .await;
-
-        let req = test::TestRequest::post()
-            .uri("/")
-            .set_json(&GreetingRequest {
-                id: "00000000-0000-0000-0000-000000000000".to_owned(),
-                jsonrpc: "2.0".to_owned(),
-                method: "wrong".to_owned(),
-                params: GreetingParams {
-                    name: "Oliver".to_owned(),
-                },
-            })
-            .to_request();
-        let resp = app.call(req).await.unwrap();
-
-        assert_eq!(resp.status(), http::StatusCode::OK);
-
-        let body_bytes = to_bytes(resp.into_body()).await.unwrap();
-        assert_eq!(
-            body_bytes,
-            r##"{"error":{"code":-32601,"message":"Method not found"},"id":"00000000-0000-0000-0000-000000000000","jsonrpc":"2.0"}"##
-        );
+            assert_eq!(actual, expected);
+        }
     }
 
     #[actix_web::test]
@@ -160,7 +142,6 @@ mod tests {
         .await;
 
         let key_values = vec![
-            ("", "Hello, World!"),
             (" ", "Hello, World!"),
             ("Oliver ", "Hello, Oliver!"),
             (" Oliver", "Hello, Oliver!"),
@@ -196,5 +177,34 @@ mod tests {
 
             assert_eq!(actual, expected);
         }
+    }
+
+    #[actix_web::test]
+    async fn test_non_existant_method() {
+        let app = test::init_service(
+            App::new().service(web::resource("/").route(web::post().to(json_rpc_handler))),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri("/")
+            .set_json(&GreetingRequest {
+                id: "00000000-0000-0000-0000-000000000000".to_owned(),
+                jsonrpc: "2.0".to_owned(),
+                method: "wrong".to_owned(),
+                params: GreetingParams {
+                    name: "Oliver".to_owned(),
+                },
+            })
+            .to_request();
+        let resp = app.call(req).await.unwrap();
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let body_bytes = to_bytes(resp.into_body()).await.unwrap();
+        assert_eq!(
+            body_bytes,
+            r##"{"error":{"code":-32601,"message":"Method not found"},"id":"00000000-0000-0000-0000-000000000000","jsonrpc":"2.0"}"##
+        );
     }
 }
