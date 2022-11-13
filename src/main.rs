@@ -42,12 +42,15 @@ struct MethodNotFoundErrorResponse {
 async fn json_rpc_handler(item: web::Json<GreetingRequest>) -> HttpResponse {
     match item.method.as_str() {
         "greeting" => {
+            let mut name = item.params.name.clone();
+            if name == "" {
+                name = "World".to_owned();
+            }
+            let greeting = format!("Hello, {name}!");
             let response = GreetingResponse {
                 id: item.id.clone(),
                 jsonrpc: item.jsonrpc.clone(),
-                result: GreetingResult {
-                    greeting: format!("Hello, {}!", item.params.name),
-                },
+                result: GreetingResult { greeting },
             };
 
             HttpResponse::Ok().json(response)
@@ -144,6 +147,35 @@ mod tests {
         assert_eq!(
             body_bytes,
             r##"{"error":{"code":-32601,"message":"Method not found"},"id":"00000000-0000-0000-0000-000000000000","jsonrpc":"2.0"}"##
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_empty_string() {
+        let app = test::init_service(
+            App::new().service(web::resource("/").route(web::post().to(json_rpc_handler))),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri("/")
+            .set_json(&GreetingRequest {
+                id: "00000000-0000-0000-0000-000000000000".to_owned(),
+                jsonrpc: "2.0".to_owned(),
+                method: "greeting".to_owned(),
+                params: GreetingParams {
+                    name: "".to_owned(),
+                },
+            })
+            .to_request();
+        let resp = app.call(req).await.unwrap();
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let body_bytes = to_bytes(resp.into_body()).await.unwrap();
+        assert_eq!(
+            body_bytes,
+            r##"{"id":"00000000-0000-0000-0000-000000000000","jsonrpc":"2.0","result":{"greeting":"Hello, World!"}}"##
         );
     }
 }
