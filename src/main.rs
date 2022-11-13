@@ -42,9 +42,9 @@ struct MethodNotFoundErrorResponse {
 async fn json_rpc_handler(item: web::Json<GreetingRequest>) -> HttpResponse {
     match item.method.as_str() {
         "greeting" => {
-            let mut name = item.params.name.clone();
-            if name == "" {
-                name = "World".to_owned();
+            let mut name = item.params.name.trim();
+            if name.is_empty() {
+                name = "World";
             }
             let greeting = format!("Hello, {name}!");
             let response = GreetingResponse {
@@ -89,7 +89,9 @@ async fn main() -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{json_rpc_handler, GreetingParams, GreetingRequest};
+    use crate::{
+        json_rpc_handler, GreetingParams, GreetingRequest, GreetingResponse, GreetingResult,
+    };
     use actix_web::{body::to_bytes, dev::Service, http, test, web, App};
 
     #[actix_web::test]
@@ -151,31 +153,48 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn test_empty_string() {
+    async fn test_other_possibilities() {
         let app = test::init_service(
             App::new().service(web::resource("/").route(web::post().to(json_rpc_handler))),
         )
         .await;
 
-        let req = test::TestRequest::post()
-            .uri("/")
-            .set_json(&GreetingRequest {
+        let key_values = vec![
+            ("", "Hello, World!"),
+            (" ", "Hello, World!"),
+            ("Oliver ", "Hello, Oliver!"),
+            (" Oliver", "Hello, Oliver!"),
+            (" Oliver ", "Hello, Oliver!"),
+        ];
+
+        for key_value in key_values {
+            let req = test::TestRequest::post()
+                .uri("/")
+                .set_json(GreetingRequest {
+                    id: "00000000-0000-0000-0000-000000000000".to_owned(),
+                    jsonrpc: "2.0".to_owned(),
+                    method: "greeting".to_owned(),
+                    params: GreetingParams {
+                        name: key_value.0.to_owned(),
+                    },
+                })
+                .to_request();
+            let resp = app.call(req).await.unwrap();
+
+            assert_eq!(resp.status(), http::StatusCode::OK);
+
+            let result = GreetingResponse {
                 id: "00000000-0000-0000-0000-000000000000".to_owned(),
                 jsonrpc: "2.0".to_owned(),
-                method: "greeting".to_owned(),
-                params: GreetingParams {
-                    name: "".to_owned(),
+                result: GreetingResult {
+                    greeting: key_value.1.to_owned(),
                 },
-            })
-            .to_request();
-        let resp = app.call(req).await.unwrap();
+            };
 
-        assert_eq!(resp.status(), http::StatusCode::OK);
+            let actual = to_bytes(resp.into_body()).await.unwrap();
+            let expected = serde_json::to_string(&result).unwrap();
 
-        let body_bytes = to_bytes(resp.into_body()).await.unwrap();
-        assert_eq!(
-            body_bytes,
-            r##"{"id":"00000000-0000-0000-0000-000000000000","jsonrpc":"2.0","result":{"greeting":"Hello, World!"}}"##
-        );
+            assert_eq!(actual, expected);
+        }
     }
 }
