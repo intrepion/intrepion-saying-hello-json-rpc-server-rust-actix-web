@@ -26,15 +26,45 @@ struct GreetingResult {
     greeting: String,
 }
 
+#[derive(Debug, Serialize)]
+struct MethodNotFoundError {
+    code: i32,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct MethodNotFoundErrorResponse {
+    error: MethodNotFoundError,
+    id: String,
+    jsonrpc: String,
+}
+
 async fn json_rpc_handler(item: web::Json<GreetingRequest>) -> HttpResponse {
-    let obj = GreetingResponse {
-        id: item.id.clone(),
-        jsonrpc: item.jsonrpc.clone(),
-        result: GreetingResult {
-            greeting: format!("Hello, {}!", item.params.name),
-        },
-    };
-    HttpResponse::Ok().json(obj)
+    match item.method.as_str() {
+        "greeting" => {
+            let response = GreetingResponse {
+                id: item.id.clone(),
+                jsonrpc: item.jsonrpc.clone(),
+                result: GreetingResult {
+                    greeting: format!("Hello, {}!", item.params.name),
+                },
+            };
+
+            HttpResponse::Ok().json(response)
+        }
+        _ => {
+            let response = MethodNotFoundErrorResponse {
+                error: MethodNotFoundError {
+                    code: -32601,
+                    message: "Method not found".to_string(),
+                },
+                id: item.id.clone(),
+                jsonrpc: item.jsonrpc.clone(),
+            };
+
+            HttpResponse::Ok().json(response)
+        }
+    }
 }
 
 #[actix_web::main]
@@ -85,6 +115,35 @@ mod tests {
         assert_eq!(
             body_bytes,
             r##"{"id":"00000000-0000-0000-0000-000000000000","jsonrpc":"2.0","result":{"greeting":"Hello, Oliver!"}}"##
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_non_existant_method() {
+        let app = test::init_service(
+            App::new().service(web::resource("/").route(web::post().to(json_rpc_handler))),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri("/")
+            .set_json(&GreetingRequest {
+                id: "00000000-0000-0000-0000-000000000000".to_owned(),
+                jsonrpc: "2.0".to_owned(),
+                method: "wrong".to_owned(),
+                params: GreetingParams {
+                    name: "Oliver".to_owned(),
+                },
+            })
+            .to_request();
+        let resp = app.call(req).await.unwrap();
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let body_bytes = to_bytes(resp.into_body()).await.unwrap();
+        assert_eq!(
+            body_bytes,
+            r##"{"error":{"code":-32601,"message":"Method not found"},"id":"00000000-0000-0000-0000-000000000000","jsonrpc":"2.0"}"##
         );
     }
 }
