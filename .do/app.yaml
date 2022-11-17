@@ -1,4 +1,4 @@
-name: saying-hello-server
+name: app-server
 region: sfo
 services:
 - dockerfile_path: Dockerfile
